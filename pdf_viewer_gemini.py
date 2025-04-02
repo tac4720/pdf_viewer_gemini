@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QMessageBox, QTabWidget, QLineEdit, QComboBox, QFormLayout, QSpacerItem,
     QProgressDialog # QProgressDialog を追加
 )
-from PyQt6.QtGui import QPixmap, QImage, QIcon, QAction, QPalette, QPainter, QFontMetrics
+from PyQt6.QtGui import QPixmap, QImage, QIcon, QAction, QPalette, QPainter, QFontMetrics, QTextCursor # QTextCursor を追加
 from PyQt6.QtCore import Qt, QSize, QTimer, QSettings, QThread, QObject, pyqtSignal # QThread, QObject, pyqtSignal を追加
 
 # --- 定数 ---
@@ -139,7 +139,50 @@ class GeminiWorker(QObject):
     def request_interruption(self):
         """ワーカに操作の中断を要求します。"""
         self._is_interrupted = True
-        print("Geminiワーカへの中断要求。")
+print("Geminiワーカへの中断要求。")
+
+
+# --- Vimキーバインド付きテキストエディット ---
+class VimKeybindTextEdit(QTextEdit):
+    """QTextEditをサブクラス化し、基本的なVimナビゲーションキー(h, j, k, l)を追加します。"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        # キーボードイベントを受け取るために強いフォーカスポリシーを設定
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+    def keyPressEvent(self, event):
+        cursor = self.textCursor()
+        key = event.key()
+        scrollbar = self.verticalScrollBar()
+        scroll_step = scrollbar.singleStep() # スクロール量を決定 (通常は1行分程度)
+
+        # Shift修飾子やその他の修飾子がないことを確認
+        if event.modifiers() == Qt.KeyboardModifier.NoModifier:
+            if key == Qt.Key.Key_J:
+                # 'j' で下にスクロール
+                scrollbar.setValue(scrollbar.value() + scroll_step)
+                event.accept()
+                return
+            elif key == Qt.Key.Key_K:
+                # 'k' で上にスクロール
+                scrollbar.setValue(scrollbar.value() - scroll_step)
+                event.accept()
+                return
+            elif key == Qt.Key.Key_H:
+                # 'h' で左にカーソル移動
+                cursor.movePosition(QTextCursor.MoveOperation.Left)
+                self.setTextCursor(cursor)
+                event.accept()
+                return
+            elif key == Qt.Key.Key_L:
+                # 'l' で右にカーソル移動
+                cursor.movePosition(QTextCursor.MoveOperation.Right)
+                self.setTextCursor(cursor)
+                event.accept()
+                return
+
+        # 他のすべてのキープレスはデフォルトの動作に任せる
+        super().keyPressEvent(event)
 
 
 # --- 汎用結果ダイアログ ---
@@ -152,9 +195,9 @@ class ResultDialog(QDialog):
         self.setMinimumSize(600, 400) # 最小サイズを大きく設定
 
         layout = QVBoxLayout(self)
-        self.text_edit = QTextEdit()
+        self.text_edit = VimKeybindTextEdit() # カスタムウィジェットを使用
         self.text_edit.setPlainText(result_text)
-        self.text_edit.setReadOnly(True)
+        self.text_edit.setReadOnly(True) # 読み取り専用に戻す
         # フォントサイズを大きくして読みやすくする
         font = self.text_edit.font()
         font.setPointSize(font.pointSize() + 2) # フォントサイズを2ポイント増やす
@@ -168,6 +211,9 @@ class ResultDialog(QDialog):
         close_button.clicked.connect(self.accept) # accept() はダイアログを閉じる
         button_box.addWidget(close_button)
         layout.addLayout(button_box)
+
+        # テキストエディットウィジェットに初期フォーカスを設定
+        self.text_edit.setFocus()
 
 # --- PDF画像用のカスタムクリック可能ラベル ---
 class ClickableImageLabel(QLabel):
@@ -519,7 +565,7 @@ class PDFViewer(QMainWindow):
 
                 # QTimerを使用して、初期表示のためにビューポートサイズが利用可能であることを確認
                 QTimer.singleShot(0, self.display_page)
-                self.setWindowTitle(f"{os.path.basename(file_path)} - 洗練されたPDFビューワー") # ファイル名を最初に表示
+                self.setWindowTitle(f"{os.path.basename(file_path)} - PDFVIEWR") # ファイル名を最初に表示
 
              except Exception as e:
                 print(f"PDF '{file_path}' のオープンエラー: {e}")
@@ -544,7 +590,7 @@ class PDFViewer(QMainWindow):
          self.image_label.setText("PDFを開いてください") # プレースホルダーテキスト
          self.image_label.resize(self.image_label.sizeHint()) # ラベルサイズをコンテンツに合わせる
          self.page_label_toolbar.setText("ページ: - / -")
-         self.setWindowTitle("洗練されたPDFビューワー")
+         self.setWindowTitle("PDFVIWER")
          self.fit_mode = None
          self.two_page_mode = False
          self.two_page_action.setChecked(False)
