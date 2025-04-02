@@ -148,17 +148,17 @@ class ResultDialog(QDialog):
     def __init__(self, result_text, window_title="結果", parent=None): # window_title を追加
         super().__init__(parent)
         self.setWindowTitle(window_title) # 動的なタイトルを使用
-        self.setGeometry(200, 200, 600, 450) # サイズ調整
-        self.setMinimumSize(400, 300) # 最小サイズを設定
+        self.setGeometry(200, 200, 800, 600) # サイズを大きく調整
+        self.setMinimumSize(600, 400) # 最小サイズを大きく設定
 
         layout = QVBoxLayout(self)
         self.text_edit = QTextEdit()
         self.text_edit.setPlainText(result_text)
         self.text_edit.setReadOnly(True)
-        # 必要に応じて少し大きなフォントで読みやすさを向上させる
-        # font = self.text_edit.font()
-        # font.setPointSize(font.pointSize() + 1)
-        # self.text_edit.setFont(font)
+        # フォントサイズを大きくして読みやすくする
+        font = self.text_edit.font()
+        font.setPointSize(font.pointSize() + 2) # フォントサイズを2ポイント増やす
+        self.text_edit.setFont(font)
         layout.addWidget(self.text_edit)
 
         # 一貫性のために標準のボタンボックスを追加
