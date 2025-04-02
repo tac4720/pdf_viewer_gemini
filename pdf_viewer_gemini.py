@@ -18,16 +18,16 @@ SETTINGS_MODEL = "gemini/model"
 SETTINGS_LAST_DIR = "general/lastDirectory" # 最後に開いたディレクトリ
 
 # モデル
-DEFAULT_MODEL = 'gemini-1.5-pro-latest' # 安定版 Pro (推奨デフォルト)
+DEFAULT_MODEL = 'gemini-2.0-flash' # 安定版 Pro (推奨デフォルト)
 # ユーザーフィードバックに基づくAVAILABLE_MODELSの更新
 AVAILABLE_MODELS = [
+    'gemini-2.5-pro-exp-03-25', # 実験的 2.5 Pro (必要に応じてコメント解除)
+    'gemini-2.0-flash',        # 次世代Flash（注意して使用）(必要に応じてコメント解除)
     'gemini-1.5-pro-latest',    # 安定版 Pro（推奨デフォルト）
     'gemini-1.5-flash-latest',  # 安定版 Flash
     'gemini-pro',               # レガシー Pro（互換性が必要な場合）
-    # 'gemini-2.5-pro-exp-03-25', # 実験的 2.5 Pro (必要に応じてコメント解除)
-    # 'gemini-2.0-flash',        # 次世代Flash（注意して使用）(必要に応じてコメント解除)
-    # 'gemini-2.0-flash-lite',   # Lite Flash (必要に応じてコメント解除)
-    # 'gemini-1.5-flash-8b',     # Small Flash (必要に応じてコメント解除)
+    'gemini-2.0-flash-lite',   # Lite Flash (必要に応じてコメント解除)
+    'gemini-1.5-flash-8b',     # Small Flash (必要に応じてコメント解除)
 ]
 # ユーザーが必要とする場合は実験的/特定のモデルを追加するが、デフォルトは安定させる
 
