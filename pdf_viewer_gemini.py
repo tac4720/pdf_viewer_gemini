@@ -565,7 +565,7 @@ class PDFViewer(QMainWindow):
 
                 # QTimerを使用して、初期表示のためにビューポートサイズが利用可能であることを確認
                 QTimer.singleShot(0, self.display_page)
-                self.setWindowTitle(f"{os.path.basename(file_path)} - PDFVIEWR") # ファイル名を最初に表示
+                self.setWindowTitle(f"{os.path.basename(file_path)} - 洗練されたPDFビューワー") # ファイル名を最初に表示
 
              except Exception as e:
                 print(f"PDF '{file_path}' のオープンエラー: {e}")
@@ -590,7 +590,7 @@ class PDFViewer(QMainWindow):
          self.image_label.setText("PDFを開いてください") # プレースホルダーテキスト
          self.image_label.resize(self.image_label.sizeHint()) # ラベルサイズをコンテンツに合わせる
          self.page_label_toolbar.setText("ページ: - / -")
-         self.setWindowTitle("PDFVIWER")
+         self.setWindowTitle("洗練されたPDFビューワー")
          self.fit_mode = None
          self.two_page_mode = False
          self.two_page_action.setChecked(False)
@@ -1057,6 +1057,18 @@ class PDFViewer(QMainWindow):
         """ショートカットのためのキープレスイベントを処理します。"""
         key = event.key()
         modifiers = event.modifiers()
+
+        # Shift修飾子なしの場合のナビゲーション
+        if modifiers == Qt.KeyboardModifier.NoModifier:
+            if key == Qt.Key.Key_H:
+                self.prev_page()
+                event.accept()
+                return
+            elif key == Qt.Key.Key_L:
+                self.next_page()
+                event.accept()
+                return
+            # 他の修飾子なしキーはここで処理可能
 
         # ナビゲーション（QActionショートカットで処理されるが、代替を追加可能）
         # if key == Qt.Key.Key_Left:
