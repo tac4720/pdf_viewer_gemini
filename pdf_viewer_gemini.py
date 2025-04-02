@@ -46,9 +46,9 @@ FIT_PADDING = 15 # 幅/高さ合わせ計算時のパディング
 
 # プロンプト
 TRANSLATION_PROMPT_TEMPLATE = "以下のテキストを日本語に翻訳してください:\n\n---\n{text}\n---"
-SUMMARIZE_PROMPT_TEMPLATE = "以下のテキストを簡潔に要約してください:\n\n---\n{text}\n---"
+SUMMARIZE_PROMPT_TEMPLATE = "以下のテキストを日本語で簡潔に要約してください::\n\n---\n{text}\n---"
 EXAMPLE_PROMPT_TEMPLATE = "以下のテキストの内容を説明する具体的な例を挙げてください。結果は日本語で出力してください:\n\n---\n{text}\n---"
-EXPLAIN_TERM_PROMPT_TEMPLATE = "以下のテキストに含まれる専門用語や重要な概念をいくつか選び、それぞれを初心者にもわかるように説明してください:\n\n---\n{text}\n---"
+EXPLAIN_TERM_PROMPT_TEMPLATE = "以下のテキストに含まれる専門用語や重要な概念をいくつか選び、それぞれを初心者にもわかるように日本語で説明してください:\n\n---\n{text}\n---"
 
 # --- ヘルパー関数 ---
 def get_icon(standard_name, fallback_path=None):
