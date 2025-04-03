@@ -565,7 +565,7 @@ class PDFViewer(QMainWindow):
 
                 # QTimerを使用して、初期表示のためにビューポートサイズが利用可能であることを確認
                 QTimer.singleShot(0, self.display_page)
-                self.setWindowTitle(f"{os.path.basename(file_path)} - 洗練されたPDFビューワー") # ファイル名を最初に表示
+                self.setWindowTitle(f"{os.path.basename(file_path)} - PDFviewer") # ファイル名を最初に表示
 
              except Exception as e:
                 print(f"PDF '{file_path}' のオープンエラー: {e}")
@@ -590,7 +590,7 @@ class PDFViewer(QMainWindow):
          self.image_label.setText("PDFを開いてください") # プレースホルダーテキスト
          self.image_label.resize(self.image_label.sizeHint()) # ラベルサイズをコンテンツに合わせる
          self.page_label_toolbar.setText("ページ: - / -")
-         self.setWindowTitle("洗練されたPDFビューワー")
+         self.setWindowTitle("PDFviewer") # タイトルをリセット
          self.fit_mode = None
          self.two_page_mode = False
          self.two_page_action.setChecked(False)
