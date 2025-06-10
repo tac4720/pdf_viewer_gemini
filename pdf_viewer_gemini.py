@@ -1,24 +1,29 @@
 import sys
 import os
+import sys
+import os
+import json # jsonを追加
 import fitz  # PyMuPDF
 import google.generativeai as genai
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
     QWidget, QFileDialog, QScrollArea, QSizePolicy, QFrame, QTextEdit, QDialog,
     QMessageBox, QTabWidget, QLineEdit, QComboBox, QFormLayout, QSpacerItem,
-    QProgressDialog # QProgressDialog を追加
+    QProgressDialog, QListWidget, QDialogButtonBox, QListWidgetItem, QToolBar, # QToolBar を追加
+    QInputDialog # QInputDialog を追加 (ショートカット用)
 )
-from PyQt6.QtGui import QPixmap, QImage, QIcon, QAction, QPalette, QPainter, QFontMetrics, QTextCursor # QTextCursor を追加
-from PyQt6.QtCore import Qt, QSize, QTimer, QSettings, QThread, QObject, pyqtSignal # QThread, QObject, pyqtSignal を追加
+from PyQt6.QtGui import QPixmap, QImage, QIcon, QAction, QPalette, QPainter, QFontMetrics, QTextCursor, QKeySequence # QKeySequence を追加
+from PyQt6.QtCore import Qt, QSize, QTimer, QSettings, QThread, QObject, pyqtSignal
 
 # --- 定数 ---
 # 設定キー
 SETTINGS_API_KEY = "gemini/apiKey"
 SETTINGS_MODEL = "gemini/model"
 SETTINGS_LAST_DIR = "general/lastDirectory" # 最後に開いたディレクトリ
+SETTINGS_CUSTOM_PROMPTS = "general/customPrompts" # カスタムプロンプト用のキーを追加
 
 # モデル
-DEFAULT_MODEL = 'gemini-2.0-flash' # 安定版 Pro (推奨デフォルト)
+DEFAULT_MODEL = 'gemini-1.5-pro-latest' # デフォルトを安定版Proに変更
 # ユーザーフィードバックに基づくAVAILABLE_MODELSの更新
 AVAILABLE_MODELS = [
     'gemini-2.5-pro-exp-03-25', # 実験的 2.5 Pro (必要に応じてコメント解除)
@@ -49,6 +54,10 @@ TRANSLATION_PROMPT_TEMPLATE = "以下のテキストを日本語に翻訳して�
 SUMMARIZE_PROMPT_TEMPLATE = "以下のテキストを日本語で簡潔に要約してください::\n\n---\n{text}\n---"
 EXAMPLE_PROMPT_TEMPLATE = "以下のテキストの内容を説明する具体的な例を挙げてください。結果は日本語で出力してください:\n\n---\n{text}\n---"
 EXPLAIN_TERM_PROMPT_TEMPLATE = "以下のテキストに含まれる専門用語や重要な概念をいくつか選び、それぞれを初心者にもわかるように日本語で説明してください:\n\n---\n{text}\n---"
+FREE_TRANSLATION_PROMPT_TEMPLATE = "以下のテキストを、文の構成を変えてもよいので、非常に分かりやすい自然な日本語に意訳してください:\n\n---\n{text}\n---" # 意訳用プロンプトを追加
+RECONSTRUCT_PROMPT_TEMPLATE = "以下のテキストの内容で伝えたいことを、別の言葉や具体的な例を用いて、より分かりやすく日本語で再構築してください:\n\n---\n{text}\n---" # 再構築用プロンプトを追加
+INTERPRET_PROMPT_TEMPLATE = "以下のテキストが伝えようとしている主な意図や目的を解釈し、日本語で説明してください:\n\n---\n{text}\n---" # 解釈用プロンプトを追加
+CUSTOM_PROMPT_PLACEHOLDER = "{text}" # プロンプト内のテキスト挿入箇所を示すプレースホルダー
 
 # --- ヘルパー関数 ---
 def get_icon(standard_name, fallback_path=None):
@@ -196,7 +205,7 @@ class ResultDialog(QDialog):
 
         layout = QVBoxLayout(self)
         self.text_edit = VimKeybindTextEdit() # カスタムウィジェットを使用
-        self.text_edit.setPlainText(result_text)
+        self.text_edit.setMarkdown(result_text) # setPlainText から setMarkdown に変更
         self.text_edit.setReadOnly(True) # 読み取り専用に戻す
         # フォントサイズを大きくして読みやすくする
         font = self.text_edit.font()
@@ -214,6 +223,70 @@ class ResultDialog(QDialog):
 
         # テキストエディットウィジェットに初期フォーカスを設定
         self.text_edit.setFocus()
+
+# --- カスタムプロンプト追加/編集ダイアログ ---
+class PromptDialog(QDialog):
+    def __init__(self, parent=None, name="", prompt="", shortcut=""):
+        super().__init__(parent)
+        self.setWindowTitle("カスタムプロンプトの編集")
+        self.setMinimumWidth(400)
+
+        layout = QVBoxLayout(self)
+        form_layout = QFormLayout()
+
+        self.name_input = QLineEdit(name)
+        self.name_input.setPlaceholderText("ボタンに表示される名前 (例: 要点抽出)")
+        form_layout.addRow("名前:", self.name_input)
+
+        self.prompt_input = QTextEdit(prompt)
+        self.prompt_input.setPlaceholderText(f"Geminiへの指示を入力します。\n抽出したテキストは {CUSTOM_PROMPT_PLACEHOLDER} の部分に挿入されます。")
+        self.prompt_input.setMinimumHeight(100) # 高さを確保
+        form_layout.addRow("プロンプト:", self.prompt_input)
+
+        # ショートカット入力 (オプション) - QKeySequenceEditの方が望ましいが、シンプルにQLineEditを使用
+        self.shortcut_input = QLineEdit(shortcut)
+        self.shortcut_input.setPlaceholderText("例: Ctrl+Shift+A (空欄可)")
+        # TODO: QKeySequenceEdit を使用するか、入力検証を追加する
+        form_layout.addRow("ショートカット:", self.shortcut_input)
+
+
+        layout.addLayout(form_layout)
+
+        # OK/キャンセルボタン
+        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+
+    def get_data(self):
+        """ダイアログから入力データを取得します。"""
+        name = self.name_input.text().strip()
+        prompt = self.prompt_input.toPlainText().strip()
+        shortcut = self.shortcut_input.text().strip() # TODO: QKeySequenceに変換/検証
+        return name, prompt, shortcut
+
+    def accept(self):
+        """OKボタンが押されたときのバリデーション。"""
+        name, prompt, _ = self.get_data()
+        if not name:
+            QMessageBox.warning(self, "入力エラー", "名前を入力してください。")
+            return
+        if not prompt:
+            QMessageBox.warning(self, "入力エラー", "プロンプトを入力してください。")
+            return
+        if CUSTOM_PROMPT_PLACEHOLDER not in prompt:
+             reply = QMessageBox.question(self, "確認",
+                                          f"プロンプトに `{CUSTOM_PROMPT_PLACEHOLDER}` が含まれていません。\n"
+                                          f"PDFのテキストはこのプレースホルダーの部分に挿入されます。\n"
+                                          f"このままでよろしいですか？",
+                                          QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                          QMessageBox.StandardButton.No)
+             if reply == QMessageBox.StandardButton.No:
+                 return # ダイアログを開いたままにする
+        # TODO: ショートカットの検証 (QKeySequence.fromString)
+
+        super().accept() # バリデーションOKならダイアログを閉じる
+
 
 # --- PDF画像用のカスタムクリック可能ラベル ---
 class ClickableImageLabel(QLabel):
@@ -240,9 +313,9 @@ class ClickableImageLabel(QLabel):
 
 # --- メインアプリケーションウィンドウ ---
 class PDFViewer(QMainWindow):
-    def __init__(self):
+    def __init__(self, initial_file_path=None): # 初期ファイルパス引数を追加
         super().__init__()
-        self.settings = QSettings("MyCompany", "SophisticatedPDFViewer") # 組織名, アプリ名
+        self.settings = QSettings("MyCompany", "PdfViewerGemini") # 組織名, アプリ名
         self.result_dialog = None # 結果ダイアログへの参照（汎用化）
         self.genai_model = None # Geminiモデルインスタンスを格納
         self.doc = None         # 現在のfitz.Document
@@ -255,6 +328,9 @@ class PDFViewer(QMainWindow):
         self.api_call_worker = None # GeminiWorkerへの参照（汎用化）
         self.progress_dialog = None # QProgressDialogへの参照
         self.current_action_name = None # 進行中のアクション名（例："翻訳"）を格納
+        self.custom_prompts = [] # カスタムプロンプトを格納するリスト
+        self.custom_actions = {} # ツールバー上のカスタムアクションへの参照 (キーはプロンプト名)
+        self.spacer_action = None # スペーサーアクションへの参照
 
         self.setWindowTitle("pdf_viewer_gemini") # タイトルを設定
         self.setGeometry(100, 100, DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT)
@@ -270,16 +346,61 @@ class PDFViewer(QMainWindow):
         # 必要に応じて特定のスタイルを適用（オプション）
         # QApplication.setStyle("Fusion")
 
+        # 初期ファイルパスが指定されている場合、UI表示後に開くようにタイマーを設定
+        if initial_file_path:
+            # QTimer.singleShotを使用して、イベントループ開始後にファイルを開く
+            QTimer.singleShot(0, lambda: self._open_initial_file(initial_file_path))
+
     def _load_settings(self):
         """QSettingsから設定をロードします。"""
         self.api_key = self.settings.value(SETTINGS_API_KEY, "")
         self.selected_model = self.settings.value(SETTINGS_MODEL, DEFAULT_MODEL)
         # ロードされたモデルが実際に利用可能であることを確認し、利用不可ならフォールバック
         if self.selected_model not in AVAILABLE_MODELS:
-            print(f"警告: 保存されたモデル '{self.selected_model}' はAVAILABLE_MODELSに見つかりません。デフォルト '{DEFAULT_MODEL}' にフォールバックします。")
+            print(f"警告: 保存されたモデル '{self.selected_model}' は利用可能なモデルリストに見つかりません。デフォルト '{DEFAULT_MODEL}' にフォールバックします。")
             self.selected_model = DEFAULT_MODEL
             # オプションで設定ファイルをフォールバックで更新
-            # self.settings.setValue(SETTINGS_MODEL, self.selected_model)
+            self.settings.setValue(SETTINGS_MODEL, self.selected_model)
+
+        # カスタムプロンプトをロード
+        try:
+            # QSettingsは文字列として保存するため、JSONとして解析する必要がある
+            prompts_json = self.settings.value(SETTINGS_CUSTOM_PROMPTS, "[]") # デフォルトは空のJSON配列文字列
+            loaded_prompts = json.loads(prompts_json)
+            # 簡単な検証 (リストであり、各要素が辞書であることを確認)
+            if isinstance(loaded_prompts, list) and all(isinstance(p, dict) for p in loaded_prompts):
+                 # 必須キーの存在を確認 (オプションだが推奨)
+                 self.custom_prompts = [
+                     p for p in loaded_prompts
+                     if 'name' in p and 'prompt' in p # 'shortcut' はオプション
+                 ]
+                 if len(self.custom_prompts) != len(loaded_prompts):
+                      print("警告: 一部のカスタムプロンプトが無効な形式のためロードされませんでした。")
+            else:
+                 print("警告: 保存されたカスタムプロンプトの形式が無効です。空のリストを使用します。")
+                 self.custom_prompts = []
+                 self.settings.setValue(SETTINGS_CUSTOM_PROMPTS, "[]") # 無効な設定をリセット
+
+        except json.JSONDecodeError:
+            print("警告: カスタムプロンプト設定の解析に失敗しました。空のリストを使用します。")
+            self.custom_prompts = []
+            self.settings.setValue(SETTINGS_CUSTOM_PROMPTS, "[]") # 無効な設定をリセット
+        except Exception as e:
+             print(f"カスタムプロンプトのロード中に予期せぬエラーが発生しました: {e}")
+             self.custom_prompts = []
+             # ここでは設定をリセットしない方が安全かもしれない
+
+    def _save_custom_prompts(self):
+        """現在のカスタムプロンプトを設定に保存します。"""
+        try:
+            prompts_json = json.dumps(self.custom_prompts, ensure_ascii=False, indent=2) # インデントして保存
+            self.settings.setValue(SETTINGS_CUSTOM_PROMPTS, prompts_json)
+            self.settings.sync() # 即時書き込み
+            print("カスタムプロンプトを保存しました。")
+        except Exception as e:
+            print(f"カスタムプロンプトの保存エラー: {e}")
+            QMessageBox.critical(self, "保存エラー", f"カスタムプロンプトの保存中にエラーが発生しました:\n{e}")
+
 
     def _configure_gemini(self):
         """現在の設定に基づいてGeminiモデルを設定します。"""
@@ -319,93 +440,112 @@ class PDFViewer(QMainWindow):
     def _init_ui(self):
         """UI要素を初期化します。"""
         # --- ツールバー ---
-        toolbar = self.addToolBar("ファイル")
-        toolbar.setIconSize(ICON_SIZE) # アイコンサイズ設定を再追加
-        toolbar.setMovable(False) # ツールバーの分離を禁止
+        self.main_toolbar = self.addToolBar("ファイル") # ツールバーへの参照を保存
+        self.main_toolbar.setObjectName("MainToolBar") # オブジェクト名を設定
+        self.main_toolbar.setIconSize(ICON_SIZE) # アイコンサイズ設定を再追加
+        self.main_toolbar.setMovable(False) # ツールバーの分離を禁止
 
         # 開くアクション
         open_action = QAction(get_icon("document-open", "icons/open.png"), "開く (&O)", self) # アイコンを復元
         open_action.setShortcut("Ctrl+O")
         open_action.triggered.connect(self.open_pdf)
-        toolbar.addAction(open_action)
+        self.main_toolbar.addAction(open_action)
 
-        toolbar.addSeparator()
+        self.main_toolbar.addSeparator()
 
         # ズームアクション
         zoom_in_action = QAction(get_icon("zoom-in", "icons/zoom-in.png"), "ズームイン (+)", self) # アイコンを復元
         zoom_in_action.setShortcut("Ctrl++")
         zoom_in_action.triggered.connect(self.zoom_in)
-        toolbar.addAction(zoom_in_action)
+        self.main_toolbar.addAction(zoom_in_action)
 
         zoom_out_action = QAction(get_icon("zoom-out", "icons/zoom-out.png"), "ズームアウト (-)", self) # アイコンを復元
         zoom_out_action.setShortcut("Ctrl+-")
         zoom_out_action.triggered.connect(self.zoom_out)
-        toolbar.addAction(zoom_out_action)
+        self.main_toolbar.addAction(zoom_out_action)
 
         # フィットアクション
         fit_width_action = QAction(get_icon("view-fit-width", "icons/fit-width.png"), "幅に合わせる", self) # アイコンを復元
         fit_width_action.setShortcut("Ctrl+W")
         fit_width_action.triggered.connect(self.set_fit_width)
-        toolbar.addAction(fit_width_action)
+        self.main_toolbar.addAction(fit_width_action)
 
         fit_height_action = QAction(get_icon("view-fit-height", "icons/fit-height.png"), "高さに合わせる", self) # アイコンを復元
         fit_height_action.setShortcut("Ctrl+H")
         fit_height_action.triggered.connect(self.set_fit_height)
-        toolbar.addAction(fit_height_action)
+        self.main_toolbar.addAction(fit_height_action)
 
-        toolbar.addSeparator()
+        self.main_toolbar.addSeparator()
 
         # 見開き表示切り替え
         self.two_page_action = QAction(get_icon("view-dual", "icons/two-page.png"), "見開き表示", self) # アイコンを復元
         self.two_page_action.setCheckable(True)
         self.two_page_action.setShortcut("Ctrl+T")
         self.two_page_action.triggered.connect(self.toggle_two_page_mode)
-        toolbar.addAction(self.two_page_action)
+        self.main_toolbar.addAction(self.two_page_action)
 
-        toolbar.addSeparator()
+        self.main_toolbar.addSeparator()
 
         # ナビゲーションアクション
         prev_action = QAction(get_icon("go-previous", "icons/prev.png"), "前のページ (←)", self) # アイコンを復元
         prev_action.setShortcut(Qt.Key.Key_Left)
         prev_action.triggered.connect(self.prev_page)
-        toolbar.addAction(prev_action)
+        self.main_toolbar.addAction(prev_action)
 
         next_action = QAction(get_icon("go-next", "icons/next.png"), "次のページ (→)", self) # アイコンを復元
         next_action.setShortcut(Qt.Key.Key_Right)
         next_action.triggered.connect(self.next_page)
-        toolbar.addAction(next_action)
+        self.main_toolbar.addAction(next_action)
 
-        toolbar.addSeparator()
+        self.main_toolbar.addSeparator()
 
         # 翻訳アクション (テキストのみ)
         translate_action = QAction("翻訳 (Tab)", self) # このアクションにはアイコンを削除
         translate_action.setShortcut(Qt.Key.Key_Tab) # Tabショートカットを保持
         translate_action.triggered.connect(self.translate_current_page)
-        toolbar.addAction(translate_action)
+        self.main_toolbar.addAction(translate_action)
+
+        # 意訳アクション (テキストのみ) - 翻訳の隣に移動
+        free_translate_action = QAction("意訳 (Ctrl+I)", self)
+        free_translate_action.setShortcut("Ctrl+I")
+        free_translate_action.triggered.connect(self.free_translate_current_page)
+        self.main_toolbar.addAction(free_translate_action)
 
         # 要約アクション (テキストのみ)
         summarize_action = QAction("要約 (Ctrl+S)", self) # このアクションにはアイコンを削除
         summarize_action.setShortcut("Ctrl+S")
         summarize_action.triggered.connect(self.summarize_current_page)
-        toolbar.addAction(summarize_action)
+        self.main_toolbar.addAction(summarize_action)
 
         # 具体例アクション (テキストのみ)
         example_action = QAction("具体例 (Ctrl+E)", self) # このアクションにはアイコンを削除
         example_action.setShortcut("Ctrl+E")
         example_action.triggered.connect(self.get_example_for_page)
-        toolbar.addAction(example_action)
+        self.main_toolbar.addAction(example_action)
 
         # 用語説明アクション (テキストのみ)
         explain_action = QAction("用語説明 (Ctrl+X)", self) # このアクションにはアイコンを削除
         explain_action.setShortcut("Ctrl+X")
         explain_action.triggered.connect(self.explain_term_on_page)
-        toolbar.addAction(explain_action)
+        self.main_toolbar.addAction(explain_action)
+
+        # 再構築アクション (テキストのみ)
+        reconstruct_action = QAction("再構築 (Ctrl+R)", self) # 新しいアクションを追加
+        reconstruct_action.setShortcut("Ctrl+R") # ショートカットを設定 (例: Ctrl+R)
+        reconstruct_action.triggered.connect(self.reconstruct_current_page) # 新しいメソッドに接続
+        self.main_toolbar.addAction(reconstruct_action)
+
+        # 解釈アクション (テキストのみ)
+        interpret_action = QAction("解釈 (Ctrl+P)", self) # 新しいアクションを追加
+        interpret_action.setShortcut("Ctrl+P") # ショートカットを設定 (例: Ctrl+P)
+        interpret_action.triggered.connect(self.interpret_current_page) # 新しいメソッドに接続
+        self.main_toolbar.addAction(interpret_action)
 
 
         # ページラベルを右に寄せるためのスペーサー
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        toolbar.addWidget(spacer)
+        self.spacer_action = self.main_toolbar.addWidget(spacer) # スペーサーのアクションを保存
 
         # ページ番号表示 (ツールバー内)
         self.page_label_toolbar = QLabel("ページ: - / -")
@@ -414,7 +554,7 @@ class PDFViewer(QMainWindow):
         # font_metrics = QFontMetrics(self.page_label_toolbar.font())
         # estimated_width = font_metrics.horizontalAdvance("ページ: 9999 / 9999") + 20 # パディングを追加
         # self.page_label_toolbar.setMinimumWidth(estimated_width)
-        toolbar.addWidget(self.page_label_toolbar)
+        self.main_toolbar.addWidget(self.page_label_toolbar) # self.main_toolbar を使用
 
 
         # --- タブウィジェット ---
@@ -478,6 +618,40 @@ class PDFViewer(QMainWindow):
         # フォームレイアウトを外側のレイアウトに追加
         settings_outer_layout.addLayout(settings_form_layout)
 
+        # --- カスタムプロンプト管理セクション ---
+        settings_outer_layout.addSpacerItem(QSpacerItem(20, 20, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)) # スペーサーを追加
+        custom_prompts_label = QLabel("カスタムプロンプト:")
+        settings_outer_layout.addWidget(custom_prompts_label)
+
+        self.custom_prompt_list = QListWidget()
+        self.custom_prompt_list.setToolTip("ダブルクリックで編集、選択して削除")
+        self.custom_prompt_list.itemDoubleClicked.connect(self._edit_custom_prompt) # ダブルクリックで編集
+        settings_outer_layout.addWidget(self.custom_prompt_list)
+
+        custom_button_layout = QHBoxLayout()
+        self.add_prompt_button = QPushButton("追加")
+        self.add_prompt_button.setIcon(get_icon("list-add"))
+        self.add_prompt_button.clicked.connect(self._add_custom_prompt)
+        custom_button_layout.addWidget(self.add_prompt_button)
+
+        self.edit_prompt_button = QPushButton("編集")
+        self.edit_prompt_button.setIcon(get_icon("document-edit"))
+        self.edit_prompt_button.clicked.connect(self._edit_custom_prompt)
+        self.edit_prompt_button.setEnabled(False) # 最初は無効
+        custom_button_layout.addWidget(self.edit_prompt_button)
+
+        self.remove_prompt_button = QPushButton("削除")
+        self.remove_prompt_button.setIcon(get_icon("list-remove"))
+        self.remove_prompt_button.clicked.connect(self._remove_custom_prompt)
+        self.remove_prompt_button.setEnabled(False) # 最初は無効
+        custom_button_layout.addWidget(self.remove_prompt_button)
+        custom_button_layout.addStretch() # ボタンを左に寄せる
+        settings_outer_layout.addLayout(custom_button_layout)
+
+        # リストの選択変更時に編集/削除ボタンの有効/無効を切り替え
+        self.custom_prompt_list.itemSelectionChanged.connect(self._update_prompt_edit_buttons_state)
+
+
         # 設定を上部に押し上げるためのスペーサー
         settings_outer_layout.addSpacerItem(QSpacerItem(20, 40, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
 
@@ -502,6 +676,10 @@ class PDFViewer(QMainWindow):
             else:
                 # デフォルトすら見つからない場合（現在のロジックでは起こらないはず）、最初のアイテムを選択
                 self.model_combo.setCurrentIndex(0)
+
+        # カスタムプロンプトUIを更新
+        self._update_custom_prompt_list_widget()
+        self._update_toolbar_custom_buttons() # ツールバー更新メソッドを呼び出す
 
 
     def _save_api_key(self):
@@ -535,6 +713,175 @@ class PDFViewer(QMainWindow):
                 # 変更されていない場合
                 self.statusBar().showMessage(f"モデル '{new_model}' は既に選択されています。", STATUS_BAR_MSG_DURATION_MS)
 
+    # --- カスタムプロンプト管理メソッド ---
+
+    def _update_custom_prompt_list_widget(self):
+        """設定リストウィジェットを現在のカスタムプロンプトで更新します。"""
+        self.custom_prompt_list.clear()
+        for prompt_data in self.custom_prompts:
+            name = prompt_data.get('name', '無名プロンプト')
+            shortcut = prompt_data.get('shortcut')
+            display_text = f"{name}"
+            if shortcut:
+                display_text += f" ({shortcut})"
+            item = QListWidgetItem(display_text)
+            # アイテムにプロンプトデータ全体を関連付ける (編集/削除時に使用)
+            item.setData(Qt.ItemDataRole.UserRole, prompt_data)
+            self.custom_prompt_list.addItem(item)
+        self._update_prompt_edit_buttons_state() # ボタンの状態も更新
+
+    def _update_toolbar_custom_buttons(self):
+        """ツールバー上のカスタムプロンプトアクションを更新します。"""
+        # 保存したツールバー参照を使用
+        if not hasattr(self, 'main_toolbar') or not self.main_toolbar:
+            print("エラー: メインツールバーが見つかりません。カスタムアクションを追加できません。")
+            return
+        # スペーサーアクションが初期化されているか確認
+        if not hasattr(self, 'spacer_action') or not self.spacer_action:
+             print("エラー: スペーサーアクションが見つかりません。カスタムアクションを正しい位置に追加できません。")
+             # フォールバックとしてツールバーの最後に追加することも検討できるが、まずはエラーを報告
+             return
+
+        # 既存のカスタムアクションを削除
+        for name, action in self.custom_actions.items():
+            self.main_toolbar.removeAction(action)
+        self.custom_actions.clear()
+
+        # 新しいアクションを追加 (スペーサーの前に追加)
+        for prompt_data in reversed(self.custom_prompts): # 逆順に追加して正しい順序にする
+            name = prompt_data.get('name')
+            prompt_template = prompt_data.get('prompt')
+            shortcut_str = prompt_data.get('shortcut', '')
+
+            if not name or not prompt_template:
+                continue # 無効なデータはスキップ
+
+            action = QAction(name, self)
+            # functools.partial を使用して、トリガー時に関数に引数を渡す
+            from functools import partial
+            action.triggered.connect(partial(self._execute_custom_prompt, name, prompt_template))
+
+            # ツールチップにプロンプト内容を表示
+            action.setToolTip(f"プロンプト:\n{prompt_template}")
+
+            # ショートカットを設定 (エラーハンドリング付き)
+            if shortcut_str:
+                try:
+                    key_sequence = QKeySequence.fromString(shortcut_str, QKeySequence.SequenceFormat.PortableText)
+                    if not key_sequence.isEmpty():
+                        action.setShortcut(key_sequence)
+                    else:
+                         print(f"警告: プロンプト '{name}' のショートカット '{shortcut_str}' は無効です。")
+                except Exception as e:
+                     print(f"警告: プロンプト '{name}' のショートカット '{shortcut_str}' の設定中にエラー: {e}")
+
+            # スペーサーのアクションの前にアクションを挿入
+            self.main_toolbar.insertAction(self.spacer_action, action)
+            self.custom_actions[name] = action # アクション参照を保存
+
+
+    def _update_prompt_edit_buttons_state(self):
+        """リストの選択に基づいて編集/削除ボタンの有効/無効を切り替えます。"""
+        selected_items = self.custom_prompt_list.selectedItems()
+        is_selected = bool(selected_items)
+        self.edit_prompt_button.setEnabled(is_selected)
+        self.remove_prompt_button.setEnabled(is_selected)
+
+    def _add_custom_prompt(self):
+        """新しいカスタムプロンプトを追加するためのダイアログを表示します。"""
+        dialog = PromptDialog(self)
+        if dialog.exec(): # exec() はモーダル表示し、ユーザーがOK/キャンセルを押すまで待機
+            name, prompt, shortcut = dialog.get_data()
+            # 名前が既存のものと重複していないかチェック (オプション)
+            if any(p['name'] == name for p in self.custom_prompts):
+                 QMessageBox.warning(self, "追加エラー", f"名前 '{name}' のプロンプトは既に存在します。")
+                 return
+
+            new_prompt_data = {'name': name, 'prompt': prompt}
+            if shortcut: # ショートカットが空でなければ追加
+                 new_prompt_data['shortcut'] = shortcut
+
+            self.custom_prompts.append(new_prompt_data)
+            self._save_custom_prompts()
+            self._update_custom_prompt_list_widget()
+            self._update_toolbar_custom_buttons() # ツールバーを更新
+            self.statusBar().showMessage(f"カスタムプロンプト '{name}' を追加しました。", STATUS_BAR_MSG_DURATION_MS)
+
+    def _edit_custom_prompt(self):
+        """選択されているカスタムプロンプトを編集するためのダイアログを表示します。"""
+        selected_items = self.custom_prompt_list.selectedItems()
+        if not selected_items:
+            return
+        item = selected_items[0]
+        original_data = item.data(Qt.ItemDataRole.UserRole)
+        if not original_data:
+             QMessageBox.warning(self, "編集エラー", "選択されたアイテムからプロンプトデータを取得できませんでした。")
+             return
+
+        original_name = original_data.get('name', '')
+        original_prompt = original_data.get('prompt', '')
+        original_shortcut = original_data.get('shortcut', '')
+
+        dialog = PromptDialog(self, name=original_name, prompt=original_prompt, shortcut=original_shortcut)
+        if dialog.exec():
+            new_name, new_prompt, new_shortcut = dialog.get_data()
+
+            # 名前が変更され、かつ新しい名前が *他の* 既存プロンプトと重複していないかチェック
+            if new_name != original_name and any(p['name'] == new_name for p in self.custom_prompts):
+                 QMessageBox.warning(self, "編集エラー", f"名前 '{new_name}' のプロンプトは既に存在します。")
+                 return
+
+            # 元のデータをリストから見つけて更新
+            for i, p_data in enumerate(self.custom_prompts):
+                 if p_data.get('name') == original_name: # 名前で識別
+                     self.custom_prompts[i]['name'] = new_name
+                     self.custom_prompts[i]['prompt'] = new_prompt
+                     if new_shortcut:
+                         self.custom_prompts[i]['shortcut'] = new_shortcut
+                     elif 'shortcut' in self.custom_prompts[i]:
+                          del self.custom_prompts[i]['shortcut'] # ショートカットが削除された場合
+                     break # 更新したらループを抜ける
+
+            self._save_custom_prompts()
+            self._update_custom_prompt_list_widget()
+            self._update_toolbar_custom_buttons() # ツールバーを更新
+            self.statusBar().showMessage(f"カスタムプロンプト '{new_name}' を更新しました。", STATUS_BAR_MSG_DURATION_MS)
+
+
+    def _remove_custom_prompt(self):
+        """選択されているカスタムプロンプトを削除します。"""
+        selected_items = self.custom_prompt_list.selectedItems()
+        if not selected_items:
+            return
+        item = selected_items[0]
+        prompt_data = item.data(Qt.ItemDataRole.UserRole)
+        if not prompt_data:
+             QMessageBox.warning(self, "削除エラー", "選択されたアイテムからプロンプトデータを取得できませんでした。")
+             return
+
+        name_to_remove = prompt_data.get('name', '不明なプロンプト')
+
+        reply = QMessageBox.question(self, "削除の確認",
+                                     f"カスタムプロンプト '{name_to_remove}' を削除しますか？",
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                     QMessageBox.StandardButton.No)
+
+        if reply == QMessageBox.StandardButton.Yes:
+            # 名前でリストから削除
+            self.custom_prompts = [p for p in self.custom_prompts if p.get('name') != name_to_remove]
+            self._save_custom_prompts()
+            self._update_custom_prompt_list_widget()
+            self._update_toolbar_custom_buttons() # ツールバーを更新
+            self.statusBar().showMessage(f"カスタムプロンプト '{name_to_remove}' を削除しました。", STATUS_BAR_MSG_DURATION_MS)
+
+    def _execute_custom_prompt(self, name, prompt_template):
+        """指定されたカスタムプロンプトを実行します。"""
+        print(f"カスタムプロンプト '{name}' を実行します。")
+        # result_dialog_title はプロンプト名を使用
+        self._call_gemini_api(prompt_template, f"{name} 結果", name)
+
+
+    # --- ファイル操作メソッド ---
     def open_pdf(self):
         """ユーザーが選択したPDFファイルを開きます。"""
         # 最後に開いたディレクトリを取得
@@ -572,6 +919,45 @@ class PDFViewer(QMainWindow):
                 QMessageBox.critical(self, "PDFオープンエラー", f"PDFファイルを開けませんでした:\n{e}")
                 self._reset_viewer_state() # エラー時にUI要素をリセット
 
+    def _open_initial_file(self, file_path):
+        """起動時に指定されたファイルを開きます。"""
+        print(f"コマンドライン引数からファイルを開こうとしています: {file_path}")
+        if file_path and os.path.exists(file_path) and file_path.lower().endswith(".pdf"):
+            # 以前のドキュメントを安全に閉じる
+            self._close_current_doc()
+            try:
+                self.doc = fitz.open(file_path)
+                if len(self.doc) == 0:
+                    raise ValueError("PDFファイルにページが含まれていません。")
+
+                self.current_page = 0
+                self.zoom_factor = 1.0
+                self.fit_mode = 'height'
+                self.two_page_mode = False
+                self.two_page_action.setChecked(False)
+                self.last_viewport_size = None
+
+                # display_pageを直接呼び出す (タイマー内なのでUIは準備完了のはず)
+                self.display_page()
+                self.setWindowTitle(f"{os.path.basename(file_path)} - PdfViewerGemini") # ファイル名を最初に表示
+                # 最後に開いたディレクトリも更新
+                current_dir = os.path.dirname(file_path)
+                self.settings.setValue(SETTINGS_LAST_DIR, current_dir)
+                print(f"コマンドライン引数のファイルを開きました: {file_path}")
+
+            except Exception as e:
+                print(f"初期ファイル '{file_path}' のオープンエラー: {e}")
+                QMessageBox.critical(self, "初期ファイルオープンエラー", f"指定されたPDFファイルを開けませんでした:\n{file_path}\n\nエラー: {e}")
+                self._reset_viewer_state()
+        else:
+            # ファイルが存在しないか、PDFでない場合
+            msg = f"指定されたファイルが見つからないか、PDFファイルではありません:\n{file_path}"
+            print(msg)
+            QMessageBox.warning(self, "ファイルオープンエラー", msg)
+            # ここではリセットは不要かもしれないが、念のため
+            self._reset_viewer_state()
+
+
     def _close_current_doc(self):
         """現在開いているドキュメントを安全に閉じます。"""
         if self.doc:
@@ -590,7 +976,7 @@ class PDFViewer(QMainWindow):
          self.image_label.setText("PDFを開いてください") # プレースホルダーテキスト
          self.image_label.resize(self.image_label.sizeHint()) # ラベルサイズをコンテンツに合わせる
          self.page_label_toolbar.setText("ページ: - / -")
-         self.setWindowTitle("PDFviewer") # タイトルをリセット
+         self.setWindowTitle("PdfViewerGemini") # タイトルをリセット
          self.fit_mode = None
          self.two_page_mode = False
          self.two_page_action.setChecked(False)
@@ -747,6 +1133,18 @@ class PDFViewer(QMainWindow):
     def explain_term_on_page(self):
         """現在表示されているページの用語説明を開始します。"""
         self._call_gemini_api(EXPLAIN_TERM_PROMPT_TEMPLATE, "用語説明", "用語説明")
+
+    def free_translate_current_page(self):
+        """現在表示されているページの意訳を開始します。"""
+        self._call_gemini_api(FREE_TRANSLATION_PROMPT_TEMPLATE, "意訳結果", "意訳")
+
+    def reconstruct_current_page(self):
+        """現在表示されているページのテキストを再構築します。"""
+        self._call_gemini_api(RECONSTRUCT_PROMPT_TEMPLATE, "再構築結果", "再構築")
+
+    def interpret_current_page(self):
+        """現在表示されているページのテキストの意図を解釈します。"""
+        self._call_gemini_api(INTERPRET_PROMPT_TEMPLATE, "解釈結果", "解釈")
 
 
     def _call_gemini_api(self, prompt_template, result_dialog_title, action_name):
@@ -1124,8 +1522,20 @@ if __name__ == "__main__":
 
     # オプション: アプリケーション詳細を設定（QSettingsのパスに便利）
     app.setOrganizationName("MyCompany")
-    app.setApplicationName("SophisticatedPDFViewer")
+    app.setApplicationName("PdfViewerGemini")
 
-    viewer = PDFViewer()
+    # コマンドライン引数を確認
+    initial_file = None
+    if len(sys.argv) > 1:
+        # 最初の引数をファイルパスとして試す
+        potential_path = sys.argv[1]
+        # 簡単なチェック（より堅牢なチェックも可能）
+        if os.path.exists(potential_path) and potential_path.lower().endswith(".pdf"):
+             initial_file = potential_path
+        else:
+             print(f"警告: コマンドライン引数 '{potential_path}' は有効なPDFファイルパスとして認識されませんでした。")
+
+    # ファイルパスを渡してビューワーを初期化
+    viewer = PDFViewer(initial_file_path=initial_file)
     viewer.show()
     sys.exit(app.exec())
